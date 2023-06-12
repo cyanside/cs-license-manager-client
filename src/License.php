@@ -20,11 +20,191 @@ class License {
 	protected $response;
 
 	/**
+	 * @var string
+	 */
+	protected $message;
+
+	/**
 	 * Class constructor.
 	 */
 	public function __construct( Client $client ) {
 		$this->client     = $client;
 		$this->option_key = '_cs_license_manager_' . md5( $this->client->get_slug() );
+
+		add_action( 'wp_ajax_cslm_license_' . $this->client->get_slug(), [ $this, 'ajax_handler' ] );
+		add_action( 'admin_menu', [ $this, 'register_sub_menu' ], 99 );
+	}
+
+	/**
+	 * Gets the saved license.
+	 *
+	 * @return array|null
+	 */
+	public function get_license(): ?string {
+		return get_option( $this->option_key, null );
+	}
+
+	/**
+	 * Registers submenu page for license manager.
+	 *
+	 * @return void
+	 */
+	public function register_sub_menu(): void {
+		add_submenu_page(
+			$this->client->get_slug(),
+			'Manage License',
+			'Manage License',
+			'manage_options',
+			$this->client->get_slug() . '-license',
+			[ $this, 'submenu_render_callback' ]
+		);
+	}
+
+	/**
+	 * Renders the submenu page.
+	 *
+	 * @return void
+	 */
+	public function submenu_render_callback() {
+		$this->handle_submit();
+
+		$is_error = true;
+
+		if ( ! empty( $this->response ) && is_array( $this->response ) ) {
+			$this->message = $this->response['message'];
+			if ( isset( $this->response['data']['status'] ) && $this->response['data']['status'] === 200 ) {
+				$is_error = false;
+			}
+		}
+
+		$license = $this->get_license();
+		$action = ( $license && isset( $license['status'] ) && 'active' === $license['status'] ) ? 'deactivate' : 'activate';
+		?>
+		<style>
+			.cs-license-manager-wrapper {
+				width: 380px;
+				padding: 8% 0 0;
+				margin: auto;
+			}
+			.cs-license-manager-wrapper .form-wrapper {
+				position: relative;
+				z-index: 1;
+				background: #FFFFFF;
+				max-width: 360px;
+				margin: 0 auto 100px;
+				padding: 24px;
+				box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+				border-radius: 16px;
+			}
+			.cs-license-manager-wrapper .form-wrapper .is-error {
+				color: #dc2626;
+			}
+			.cs-license-manager-wrapper .license-form input {
+				font-family: system-ui;
+				outline: 0;
+				background: #f2f2f2;
+				width: 100%;
+				border: 0;
+				margin: 0 0 15px;
+				padding: 15px;
+				box-sizing: border-box;
+				font-size: 14px;
+				border-radius: 8px;
+			}
+			.cs-license-manager-wrapper .license-form button {
+				font-family: system-ui;
+				text-transform: uppercase;
+				outline: 0;
+				background: #f97316;
+				width: 100%;
+				border: 0;
+				padding: 15px;
+				color: #FFFFFF;
+				font-size: 14px;
+				cursor: pointer;
+				border-radius: 8px;
+			}
+			.cs-license-manager-wrapper .license-form button:hover,.form button:active,.form button:focus {
+				background: #ea580c;
+			}
+		</style>
+
+		<div class="cs-license-manager-wrapper">
+			<div class="form-wrapper">
+				<h1>Manage License</h1>
+				<h2>License Status: Not Activated</h2>
+				<p class="<?php echo esc_attr( $is_error ? 'is-error' : '' ); ?>"><?php echo esc_html( $this->message ); ?></p>
+				<hr>
+				<br>
+
+				<form method="post" novalidate="novalidate" spellcheck="false" autocomplete="on" class="license-form">
+					<input type="hidden" name="_action" value="<?php echo $action; ?>">
+					<input type="hidden" name="_nonce" value="<?php echo wp_create_nonce( $this->client->get_slug() ); ?>">
+
+					<label for="license-key">License Key</label>
+					<input id="license-key" name="license_key" type="text" placeholder="LNXXXX-XXXX-XXXX-XXXX-XXXX"/>
+					<label for="email">Email</label>
+					<input id="email" name="email" type="text" placeholder="john@test.com"/>
+					<button>Activate</button>
+				</form>
+			</div>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Submit handler for license management.
+	 *
+	 * @return void
+	 */
+	public function handle_submit(): void {
+		if ( ! isset( $_POST['_action'] ) ) {
+			return;
+		}
+
+		if ( ! isset( $_POST['_nonce'] )
+		    || ! wp_verify_nonce( sanitize_key( wp_unslash( $_POST['_nonce'] ) ), $this->client->get_slug() ) ) {
+			$this->message = 'Error! Server validation failed.';
+			return;
+		}
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			$this->message = 'Error! You do not have permission to do that.';
+			return;
+		}
+
+		$license_key = isset( $_POST['license_key'] ) ? sanitize_text_field( wp_unslash( $_POST['license_key'] ) ) : '';
+		$email       = isset( $_POST['email'] ) ? sanitize_text_field( wp_unslash( $_POST['email'] ) ) : '';
+		$action      = sanitize_text_field( wp_unslash( $_POST['_action'] ) );
+
+		if ( empty( $license_key ) || empty( $email ) || empty( $action ) ) {
+			$this->message = 'Error! Param(s) validation failed.';
+			return;
+		}
+
+		if ( ! is_email( $email ) ) {
+			$this->message = 'Error! Email is invalid.';
+			return;
+		}
+
+		$params = [
+			'license_key' => $license_key,
+			'email'       => $email,
+		];
+
+		switch ( $action ) {
+			case 'activate':
+				$this->activate( $params );
+				break;
+
+			case 'deactivate':
+				$this->deactivate( $params );
+				break;
+
+			case 'validate':
+				$this->validate( $params );
+				break;
+		}
 	}
 
 	/**
@@ -32,9 +212,9 @@ class License {
 	 *
 	 * @param array $args
 	 *
-	 * @return void
+	 * @return array|mixed
 	 */
-	public function activate( array $args ): void {
+	public function activate( array $args ) {
 		$response = $this->client->send_request(
 			$args,
 			'licenses/activate'
@@ -43,6 +223,8 @@ class License {
 		if ( ! is_wp_error( $response ) ) {
 			$this->response = json_decode( wp_remote_retrieve_body( $response ), true );
 		} // TODO: handle 'else' condition for internal errors.
+
+		return $this->response;
 	}
 
 	/**
@@ -50,9 +232,9 @@ class License {
 	 *
 	 * @param array $args
 	 *
-	 * @return void
+	 * @return array|mixed
 	 */
-	public function deactivate( array $args ): void {
+	public function deactivate( array $args ) {
 		$response = $this->client->send_request(
 			$args,
 			'licenses/deactivate'
@@ -61,6 +243,8 @@ class License {
 		if ( ! is_wp_error( $response ) ) {
 			$this->response = json_decode( wp_remote_retrieve_body( $response ), true );
 		} // TODO: handle 'else' condition for internal errors.
+
+		return $this->response;
 	}
 
 	/**
@@ -68,9 +252,9 @@ class License {
 	 *
 	 * @param array $args
 	 *
-	 * @return void
+	 * @return array|mixed
 	 */
-	public function validate( array $args ): void {
+	public function validate( array $args ) {
 		$response = $this->client->send_request(
 			$args,
 			'licenses/validate'
@@ -79,5 +263,7 @@ class License {
 		if ( ! is_wp_error( $response ) ) {
 			$this->response = json_decode( wp_remote_retrieve_body( $response ), true );
 		} // TODO: handle 'else' condition for internal errors.
+
+		return $this->response;
 	}
 }
