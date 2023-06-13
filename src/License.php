@@ -40,7 +40,7 @@ class License {
 	 *
 	 * @return array|null
 	 */
-	public function get_license(): ?string {
+	public function get_license(): ?array {
 		return get_option( $this->option_key, null );
 	}
 
@@ -72,13 +72,20 @@ class License {
 
 		if ( ! empty( $this->response ) && is_array( $this->response ) ) {
 			$this->message = $this->response['message'];
-			if ( isset( $this->response['data']['status'] ) && $this->response['data']['status'] === 200 ) {
+			if ( $this->is_success_response() ) {
 				$is_error = false;
 			}
 		}
 
 		$license = $this->get_license();
-		$action = ( $license && isset( $license['status'] ) && 'active' === $license['status'] ) ? 'deactivate' : 'activate';
+
+		$is_license_active = ( $license && isset( $license['status'] ) && 'active' === $license['status'] );
+		$action            = $is_license_active ? 'deactivate' : 'activate';
+
+		if ( $is_license_active ) {
+			$license_key = $license['license_key'];
+			$email       = $license['email'];
+		}
 		?>
 		<style>
 			.cs-license-manager-wrapper {
@@ -98,6 +105,9 @@ class License {
 			}
 			.cs-license-manager-wrapper .form-wrapper .is-error {
 				color: #dc2626;
+			}
+			.cs-license-manager-wrapper .form-wrapper .active {
+				color: #22c55e;
 			}
 			.cs-license-manager-wrapper .license-form input {
 				font-family: system-ui;
@@ -123,6 +133,7 @@ class License {
 				font-size: 14px;
 				cursor: pointer;
 				border-radius: 8px;
+				font-weight: bold;
 			}
 			.cs-license-manager-wrapper .license-form button:hover,.form button:active,.form button:focus {
 				background: #ea580c;
@@ -132,7 +143,7 @@ class License {
 		<div class="cs-license-manager-wrapper">
 			<div class="form-wrapper">
 				<h1>Manage License</h1>
-				<h2>License Status: Not Activated</h2>
+				<h2>License Status: <span class="<?php echo esc_attr( $is_license_active ? 'active' : '' ); ?>"><?php echo esc_html( $is_license_active ? 'Activated' : 'Not Activated' ); ?></span></h2>
 				<p class="<?php echo esc_attr( $is_error ? 'is-error' : '' ); ?>"><?php echo esc_html( $this->message ); ?></p>
 				<hr>
 				<br>
@@ -141,11 +152,11 @@ class License {
 					<input type="hidden" name="_action" value="<?php echo $action; ?>">
 					<input type="hidden" name="_nonce" value="<?php echo wp_create_nonce( $this->client->get_slug() ); ?>">
 
-					<label for="license-key">License Key</label>
-					<input id="license-key" name="license_key" type="text" placeholder="LNXXXX-XXXX-XXXX-XXXX-XXXX"/>
-					<label for="email">Email</label>
-					<input id="email" name="email" type="text" placeholder="john@test.com"/>
-					<button>Activate</button>
+					<label for="license-key">License Key*</label>
+					<input id="license-key" name="license_key" <?php echo esc_attr( $is_license_active ? 'readonly' : '' ); ?> value="<?php echo esc_html( $license_key ?? '' ); ?>" type="text" placeholder="LNXXXX-XXXX-XXXX-XXXX-XXXX"/>
+					<label for="email">Email*</label>
+					<input id="email" name="email" <?php echo esc_attr( $is_license_active ? 'readonly' : '' ); ?> type="text" value="<?php echo esc_html( $email ?? '' ); ?>" placeholder="john@test.com"/>
+					<button><?php echo esc_html( $is_license_active ? 'Deactivate' : 'Activate' ); ?></button>
 				</form>
 			</div>
 		</div>
@@ -178,7 +189,7 @@ class License {
 		$action      = sanitize_text_field( wp_unslash( $_POST['_action'] ) );
 
 		if ( empty( $license_key ) || empty( $email ) || empty( $action ) ) {
-			$this->message = 'Error! Param(s) validation failed.';
+			$this->message = 'Error! License key / Email can not be empty.';
 			return;
 		}
 
@@ -222,6 +233,26 @@ class License {
 
 		if ( ! is_wp_error( $response ) ) {
 			$this->response = json_decode( wp_remote_retrieve_body( $response ), true );
+
+			if ( $this->is_success_response() ) {
+				$data = [
+					'status'      => 'active',
+					'license_key' => $args['license_key'],
+					'email'       => $args['email'],
+				];
+
+				update_option( $this->option_key, $data, false );
+			} else {
+				if ( empty( $this->response ) ) {
+					$this->response = [
+						'code' => '',
+						'message' => 'Something went wrong. Please contact support.',
+						'data' => [
+							'status' => 400,
+						],
+					];
+				}
+			}
 		} // TODO: handle 'else' condition for internal errors.
 
 		return $this->response;
@@ -242,7 +273,27 @@ class License {
 
 		if ( ! is_wp_error( $response ) ) {
 			$this->response = json_decode( wp_remote_retrieve_body( $response ), true );
-		} // TODO: handle 'else' condition for internal errors.
+
+			if ( $this->is_success_response() ) {
+				$data = [
+					'status'      => 'inactive',
+					'license_key' => '',
+					'email'       => '',
+				];
+
+				update_option( $this->option_key, $data, false );
+			} else {
+				if ( empty( $this->response ) ) {
+					$this->response = [
+						'code' => '',
+						'message' => 'Something went wrong. Please contact support.',
+						'data' => [
+							'status' => 400,
+						],
+					];
+				}
+			}
+		}
 
 		return $this->response;
 	}
@@ -265,5 +316,14 @@ class License {
 		} // TODO: handle 'else' condition for internal errors.
 
 		return $this->response;
+	}
+
+	/**
+	 * Checks if the current response is a successful one.
+	 *
+	 * @return bool
+	 */
+	public function is_success_response(): bool {
+		return isset( $this->response['data']['status'] ) && $this->response['data']['status'] === 200;
 	}
 }
