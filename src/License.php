@@ -33,14 +33,14 @@ class License {
 	 * Class constructor.
 	 */
 	public function __construct( Client $client ) {
-		$this->client     = $client;
-		$this->option_key = '_cs_license_manager_' . md5( $this->client->get_slug() );
+		$this->client          = $client;
+		$this->option_key      = '_cs_license_manager_' . md5( $this->client->get_slug() );
 		$this->cron_event_hook = '_cs_license_manager_event_' . $this->client->get_slug();
 
 		add_action( 'wp_ajax_cslm_license_' . $this->client->get_slug(), [ $this, 'ajax_handler' ] );
 		add_action( 'admin_menu', [ $this, 'register_sub_menu' ], 99 );
 
-		// Run cron hook to check license status daily.
+		// Cron event to refresh license data daily.
 		add_action( $this->cron_event_hook, [ $this, 'refresh_license_data' ] );
 
 		$this->init_schedule();
