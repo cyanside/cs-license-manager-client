@@ -25,14 +25,35 @@ class License {
 	protected $message;
 
 	/**
+	 * @var string
+	 */
+	protected $cron_event_hook;
+
+	/**
 	 * Class constructor.
 	 */
 	public function __construct( Client $client ) {
 		$this->client     = $client;
 		$this->option_key = '_cs_license_manager_' . md5( $this->client->get_slug() );
+		$this->cron_event_hook = '_cs_license_manager_event_' . $this->client->get_slug();
 
 		add_action( 'wp_ajax_cslm_license_' . $this->client->get_slug(), [ $this, 'ajax_handler' ] );
 		add_action( 'admin_menu', [ $this, 'register_sub_menu' ], 99 );
+
+		// Run cron hook to check license status daily.
+		add_action( $this->cron_event_hook, [ $this, 'refresh_license_data' ] );
+
+		$this->init_schedule();
+	}
+
+	/**
+	 * Initializes cron events on lifecycle hooks.
+	 *
+	 * @return void
+	 */
+	private function init_schedule() {
+		register_activation_hook( $this->client->get_file(), [ $this, 'schedule_cron_event' ] );
+		register_deactivation_hook( $this->client->get_file(), [ $this, 'clear_scheduler' ] );
 	}
 
 	/**
@@ -79,12 +100,20 @@ class License {
 
 		$license = $this->get_license();
 
+		$license_key = $license['license_key'] ?? '';
+		$email       = $license['email'] ?? '';
+
 		$is_license_active = ( $license && isset( $license['status'] ) && 'active' === $license['status'] );
 		$action            = $is_license_active ? 'deactivate' : 'activate';
 
-		if ( $is_license_active ) {
-			$license_key = $license['license_key'];
-			$email       = $license['email'];
+		$license_status_text = 'Activated';
+
+		if ( ! $is_license_active && ! empty( $license['status'] ) ) {
+			if ( $license['status'] === 'inactive' ) {
+				$license_status_text = 'Not Activated';
+			} elseif ( $license['status'] === 'expired' ) {
+				$license_status_text = 'Expired';
+			}
 		}
 		?>
 		<style>
@@ -99,7 +128,7 @@ class License {
 				background: #FFFFFF;
 				max-width: 360px;
 				margin: 0 auto 100px;
-				padding: 24px;
+				padding: 22px;
 				box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
 				border-radius: 16px;
 			}
@@ -138,12 +167,30 @@ class License {
 			.cs-license-manager-wrapper .license-form button:hover,.form button:active,.form button:focus {
 				background: #ea580c;
 			}
+			.cs-license-manager-wrapper .license-form .secondary {
+				font-family: system-ui;
+				text-transform: uppercase;
+				outline: 0;
+				border: 1px solid #f97316;
+				background: #FFFFFF;
+				width: 100%;
+				padding: 15px;
+				color: #f97316;
+				font-size: 14px;
+				cursor: pointer;
+				border-radius: 8px;
+				font-weight: bold;
+			}
+			.cs-license-manager-wrapper .license-form .secondary:hover {
+				background: #ea580c;
+				color: white;
+			}
 		</style>
 
 		<div class="cs-license-manager-wrapper">
 			<div class="form-wrapper">
 				<h1>Manage License</h1>
-				<h2>License Status: <span class="<?php echo esc_attr( $is_license_active ? 'active' : '' ); ?>"><?php echo esc_html( $is_license_active ? 'Activated' : 'Not Activated' ); ?></span></h2>
+				<h2>License Status: <span class="<?php echo esc_attr( $is_license_active ? 'active' : '' ); ?> <?php echo esc_attr( $is_error ? 'is-error' : '' ); ?>"><?php echo esc_html( $license_status_text ); ?></span></h2>
 				<p class="<?php echo esc_attr( $is_error ? 'is-error' : '' ); ?>"><?php echo esc_html( $this->message ); ?></p>
 				<hr>
 				<br>
@@ -156,8 +203,22 @@ class License {
 					<input id="license-key" name="license_key" <?php echo esc_attr( $is_license_active ? 'readonly' : '' ); ?> value="<?php echo esc_html( $license_key ?? '' ); ?>" type="text" placeholder="LNXXXX-XXXX-XXXX-XXXX-XXXX"/>
 					<label for="email">Email*</label>
 					<input id="email" name="email" <?php echo esc_attr( $is_license_active ? 'readonly' : '' ); ?> type="text" value="<?php echo esc_html( $email ?? '' ); ?>" placeholder="john@test.com"/>
-					<button><?php echo esc_html( $is_license_active ? 'Deactivate' : 'Activate' ); ?></button>
+					<button type="submit"><?php echo esc_html( $is_license_active ? 'Deactivate' : 'Activate' ); ?></button>
 				</form>
+
+				<?php if ( $license && $license['license_key'] ) { ?>
+					<br>
+					<form method="post" class="license-form" novalidate="novalidate" spellcheck="false">
+						<input type="hidden" name="_action" value="validate">
+						<input type="hidden" name="_nonce" value="<?php echo wp_create_nonce( $this->client->get_slug() ); ?>">
+						<input type="hidden" name="license_key" value="<?php echo esc_html( $license_key ?? '' ); ?>">
+						<input type="hidden" name="email" value="<?php echo esc_html( $email ?? '' ); ?>">
+						<button class="secondary" type="submit" name="submit">
+							<span class="dashicons dashicons-update"></span>
+							Refresh License
+						</button>
+					</form>
+				<?php } ?>
 			</div>
 		</div>
 		<?php
@@ -313,7 +374,23 @@ class License {
 
 		if ( ! is_wp_error( $response ) ) {
 			$this->response = json_decode( wp_remote_retrieve_body( $response ), true );
-		} // TODO: handle 'else' condition for internal errors.
+
+			if ( $this->is_success_response() ) {
+				$data = [
+					'status'      => 'active',
+					'license_key' => $args['license_key'],
+					'email'       => $args['email'],
+				];
+			} else {
+				$data = array_merge(
+					$args,
+					[
+						'status' => 'expired',
+					],
+				);
+			}
+			update_option( $this->option_key, $data, false );
+		}
 
 		return $this->response;
 	}
@@ -325,5 +402,47 @@ class License {
 	 */
 	public function is_success_response(): bool {
 		return isset( $this->response['data']['status'] ) && $this->response['data']['status'] === 200;
+	}
+
+	/**
+	 * Schedule License checker event.
+	 *
+	 * @return void
+	 */
+	public function schedule_cron_event(): void {
+		if ( ! wp_next_scheduled( $this->cron_event_hook ) ) {
+			wp_schedule_event( time(), 'daily', $this->cron_event_hook );
+
+			wp_schedule_single_event( time() + 10, $this->cron_event_hook );
+		}
+	}
+
+	/**
+	 * Clear any previously scheduled hook.
+	 *
+	 * @return void
+	 */
+	public function clear_scheduler(): void {
+		wp_clear_scheduled_hook( $this->cron_event_hook );
+	}
+
+	/**
+	 * Refreshes the license.
+	 *
+	 * @return void
+	 */
+	public function refresh_license_data(): void {
+		$license = $this->get_license();
+
+		if ( ! $license || empty( $license['license_key'] || empty( $license['email'] ) ) ) {
+			return;
+		}
+
+		$params = [
+			'license_key' => $license['license_key'],
+			'email'       => $license['email'],
+		];
+
+		$this->validate( $params );
 	}
 }

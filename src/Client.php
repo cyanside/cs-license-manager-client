@@ -37,6 +37,11 @@ class Client {
 	protected $license;
 
 	/**
+	 * @var string
+	 */
+	protected $file;
+
+	/**
 	 * Initializes the client.
 	 *
 	 * @return License
@@ -65,6 +70,24 @@ class Client {
 	 */
 	public function set_slug( string $slug ): Client {
 		$this->slug = $slug;
+
+		return $this;
+	}
+
+	/**
+	 * @return string
+	 */
+	public function get_file(): string {
+		return $this->file;
+	}
+
+	/**
+	 * @param string $file
+	 *
+	 * @return Client
+	 */
+	public function set_file( string $file ): Client {
+		$this->file = $file;
 
 		return $this;
 	}
