@@ -42,11 +42,21 @@ class Client {
 	protected $file;
 
 	/**
-	 * Initializes the client.
+	 * @var Updater
+	 */
+	protected $updater;
+
+	/**
+	 * @var string
+	 */
+	protected $base_name;
+
+	/**
+	 * Initializes the license manager.
 	 *
 	 * @return License
 	 */
-	public function init(): License {
+	public function license_manager(): License {
 		if ( ! empty( $this->license ) ) {
 			return $this->license;
 		}
@@ -54,6 +64,21 @@ class Client {
 		$this->license = new License( $this );
 
 		return $this->license;
+	}
+
+	/**
+	 * Initializes the updater.
+	 *
+	 * @return Updater
+	 */
+	public function updater(): Updater {
+		if ( ! empty( $this->updater ) ) {
+			return $this->updater;
+		}
+
+		$this->updater = new Updater( $this );
+
+		return $this->updater;
 	}
 
 	/**
@@ -88,6 +113,24 @@ class Client {
 	 */
 	public function set_file( string $file ): Client {
 		$this->file = $file;
+
+		return $this;
+	}
+
+	/**
+	 * @return string
+	 */
+	public function get_base_name(): string {
+		return $this->base_name;
+	}
+
+	/**
+	 * @param string $base_name
+	 *
+	 * @return Client
+	 */
+	public function set_base_name( string $base_name ): Client {
+		$this->base_name = $base_name;
 
 		return $this;
 	}
@@ -202,5 +245,16 @@ class Client {
 		$protocol = $this->is_ssl_verify() ? 'https' : 'http';
 
 		return $protocol . '://' . $this->get_server_domain();
+	}
+
+	/**
+	 * Checks if the current response is a successful one.
+	 *
+	 * @param $response
+	 *
+	 * @return bool
+	 */
+	public function is_success_response( $response ): bool {
+		return isset( $response['data']['status'] ) && $response['data']['status'] === 200;
 	}
 }

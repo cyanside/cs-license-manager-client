@@ -93,7 +93,7 @@ class License {
 
 		if ( ! empty( $this->response ) && is_array( $this->response ) ) {
 			$this->message = $this->response['message'];
-			if ( $this->is_success_response() ) {
+			if ( $this->client->is_success_response( $this->response ) ) {
 				$is_error = false;
 			}
 		}
@@ -295,7 +295,7 @@ class License {
 		if ( ! is_wp_error( $response ) ) {
 			$this->response = json_decode( wp_remote_retrieve_body( $response ), true );
 
-			if ( $this->is_success_response() ) {
+			if ( $this->client->is_success_response( $this->response ) ) {
 				$data = [
 					'status'      => 'active',
 					'license_key' => $args['license_key'],
@@ -335,7 +335,7 @@ class License {
 		if ( ! is_wp_error( $response ) ) {
 			$this->response = json_decode( wp_remote_retrieve_body( $response ), true );
 
-			if ( $this->is_success_response() ) {
+			if ( $this->client->is_success_response( $this->response ) ) {
 				$data = [
 					'status'      => 'inactive',
 					'license_key' => '',
@@ -375,7 +375,7 @@ class License {
 		if ( ! is_wp_error( $response ) ) {
 			$this->response = json_decode( wp_remote_retrieve_body( $response ), true );
 
-			if ( $this->is_success_response() ) {
+			if ( $this->client->is_success_response( $this->response ) ) {
 				$data = [
 					'status'      => 'active',
 					'license_key' => $args['license_key'],
