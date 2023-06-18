@@ -115,7 +115,7 @@ class Updater {
 				return null;
 			}
 
-			if ( ! empty( $this->response['data']['update_info']['new_version'] ) ) {
+			if ( ! empty( $this->response['data']['update_info']['new_version'] ) && ! empty( $this->response['data']['update_info']['package'] ) ) {
 				return (object) array_merge(
 					[
 						'slug'   => $this->client->get_slug(),
