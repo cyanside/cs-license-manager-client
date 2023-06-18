@@ -106,11 +106,11 @@ class License {
 		$is_license_active = ( $license && isset( $license['status'] ) && 'active' === $license['status'] );
 		$action            = $is_license_active ? 'deactivate' : 'activate';
 
-		$license_status_text = 'Activated';
+		$license_status_text = 'Not Activated';
 
-		if ( ! $is_license_active && ! empty( $license['status'] ) ) {
-			if ( $license['status'] === 'inactive' ) {
-				$license_status_text = 'Not Activated';
+		if ( ! empty( $license['status'] ) ) {
+			if ( $license['status'] === 'active' ) {
+				$license_status_text = 'Activated';
 			} elseif ( $license['status'] === 'expired' ) {
 				$license_status_text = 'Expired';
 			}
